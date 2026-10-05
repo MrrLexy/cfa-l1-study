@@ -436,6 +436,7 @@
     <button type="button" class="pop-x" id="pop-x" aria-label="Close">✕</button></div>
   <div class="pop-body" id="pop-body"></div>
 </div>
+<script src="static/ties.js"></script>
 <script src="static/data/study-path.js"></script>
 <script src="static/data/los-cards.js"></script>
 <script src="static/data/guide-narratives.js"></script>
@@ -488,14 +489,17 @@ function fmt(s) {
 // Bare LaTeX (formula data) is rendered straight from data-tex; prose with \( \) / \[ \] by auto-render.
 // data-strict: maths that may not parse; if KaTeX can't parse it, show the source quietly instead of red error text.
 // data-bare: TeX found loose in the prose; if it won't parse either, it goes back to being plain text.
-const tex = (latex, display, strict, bare) => `<span class="tex" data-tex="${esc(latex)}"${display ? " data-display" : ""}${strict ? " data-strict" : ""}${bare ? " data-bare" : ""}></span>`;
+// `plain` is the formula as written, kept when value marks were added to it, so a formula the marks break still shows as before
+const tex = (latex, display, strict, bare, plain) => `<span class="tex" data-tex="${esc(latex)}"${plain ? ` data-plain="${esc(plain)}"` : ""}${display ? " data-display" : ""}${strict ? " data-strict" : ""}${bare ? " data-bare" : ""}></span>`;
 function typeset(el) {
   if (!window.renderMathInElement || !window.katex) return void setTimeout(() => typeset(el), 200);  // KaTeX still loading
   el.querySelectorAll(".tex[data-tex]").forEach((t) => {
     const strict = t.hasAttribute("data-strict");
-    try { katex.render(t.dataset.tex, t, { displayMode: t.hasAttribute("data-display"), throwOnError: strict, strict: "ignore" }); }
-    catch { t.textContent = t.dataset.tex; t.classList.add(t.hasAttribute("data-bare") ? "tex-bare" : "tex-raw"); }
-    t.removeAttribute("data-tex");
+    const opts = { displayMode: t.hasAttribute("data-display"), throwOnError: strict, strict: "ignore", trust: (c) => c.command === "\\htmlClass" }, plain = t.dataset.plain;
+    const raw = (src) => { t.textContent = src; t.classList.add(t.hasAttribute("data-bare") ? "tex-bare" : "tex-raw"); };
+    try { katex.render(t.dataset.tex, t, opts); if (plain && t.querySelector(".katex-error")) throw 0; }
+    catch { if (!plain) raw(t.dataset.tex); else { window.__tieFallbacks = (window.__tieFallbacks || 0) + 1; try { katex.render(plain, t, opts); } catch { raw(plain); } } }
+    t.removeAttribute("data-tex"); t.removeAttribute("data-plain");
   });
   renderMathInElement(el, { throwOnError: false, delimiters: [
     { left: "\\[", right: "\\]", display: true }, { left: "\\(", right: "\\)", display: false }] });
@@ -816,19 +820,23 @@ const BARE_RE = new RegExp(`${TEX_ATOM}(?:[ \\t]*[=+\\-*/,]?[ \\t]*${TEX_ATOM})*
 const texFix = (latex) => latex.trim().replace(/[\u2010\u2011]/g, "-").replace(/[\u00a0\u202f]/g, " ");
 function rich(s, ctx, inline) {
   const keep = [], display = new Set();
+  // value marks (static/ties.js) for the question being drawn: the Path sets window.__TIE round its calls
+  const TIE = window.__TIE || null, GIVEN = !!window.__TIE_GIVEN;
+  const tied = (latex, disp, strict, bare) => { const w = TIE ? TIE.tex(latex, GIVEN) : latex; return tex(w, disp, strict, bare, w === latex ? null : latex); };
   const ph = (h, disp) => { const c = String.fromCharCode(0xF000 + keep.push(h) - 1); if (disp) display.add(c); return c; };
   let t = repairTeX(s).replace(MATH_RE, (m0, dd, br, pa, env, envName, dol) => {
     if (dol !== undefined && !/[\\_^{}=]/.test(dol) && !/^[A-Za-z]$/.test(dol)) return m0;  // "$5 and $10" is money
     const latex = texFix(dd ?? br ?? pa ?? env ?? dol), disp = !inline && (dd !== undefined || br !== undefined || env !== undefined);
-    return ph(tex(latex, disp, true), disp);
+    return ph(tied(latex, disp, true), disp);
   });
   if (display.size) t = t.replace(new RegExp(`([${[...display].join("")}])[ \\t]*[.,;:](?=\\s|$)`, "g"), "$1");  // no lone "." under a displayed formula
   t = t.replace(/\\(?:begin|end)\{[a-zA-Z*]+\}|\\(?:tag|label)\{[^}]*\}|\\nonumber\b/g, " ")  // environment markers left without a partner
     .replace(BARE_RE, (m0) => {
       const core = m0.replace(/^(?:\s*\\(?:[bB]igg?[lr]?|left|right|middle|quad|qquad|displaystyle|nonumber|notag)(?![a-zA-Z]))+|(?:\s*\\(?:[bB]igg?[lr]?|left|right|middle|quad|qquad|nonumber|notag)(?![a-zA-Z]))+\s*$/g, "");
-      return core.trim() ? ph(tex(texFix(core), false, true, true)) : " ";  // sizing commands whose bracket went missing are dropped
+      return core.trim() ? ph(tied(texFix(core), false, true, true)) : " ";  // sizing commands whose bracket went missing are dropped
     })
     .replace(/\t/g, " ");
+  if (TIE) t = TIE.text(t, GIVEN, (cls, num) => ph(`<mark class="${cls} num">${esc(num)}</mark>`));
   t = esc(linkify(t, ctx, ph));
   t = fmtPlain(t)
     .replace(/\*\*(?=\S)([^*\n]+?)\*\*/g, "<strong>$1</strong>")
@@ -1884,7 +1892,7 @@ async function load() {
       if ($("q").value.trim()) { hits = search($("q").value); drawResults(); }
     }
     live.className = "live";
-    live.innerHTML = "<i></i>Copy from 2026-10-04";
+    live.innerHTML = "<i></i>Copy from 2026-10-05";
   } catch {
     live.className = "live stale"; live.innerHTML = "<i></i>Couldn't load the data";
     if (!DATA) $("content").innerHTML = `<p class="offline">Can't load the Study Map data.</p>`;

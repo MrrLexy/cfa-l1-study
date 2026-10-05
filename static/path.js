@@ -36,6 +36,37 @@
   // ---------------------------------------------------------------- helpers
   const E = (s) => esc(s);
   const R = (s, inline) => rich(String(s ?? ""), null, !!inline);
+  // ---- trace the numbers (static/ties.js): the same value has the same colour in the question, its case and the worked answer
+  const TIEPREF = "site-ties";
+  const tiesOn = () => { try { return localStorage.getItem(TIEPREF) !== "off"; } catch { return true; } };
+  const tieMemo = new Map(), hintedQ = new Set();   // ties by question id; questions whose "which numbers?" hint was asked for
+  function tiesOf(id) {
+    if (!window.Ties) return null;
+    if (!tieMemo.has(id)) {
+      const x = q(id), st = x.set && PATH.sets[x.set];
+      tieMemo.set(id, Ties.build({ source: [st ? st.vignette : "", x.stem], solution: [x.explanation], options: ["A", "B", "C"].map((l) => x.options[l]) }));
+    }
+    return tieMemo.get(id);
+  }
+  // R() with the marks of one question; givenOnly keeps to the values the question itself gives
+  function RT(s, t, givenOnly, inline) {
+    if (!t || !t.groups.length) return R(s, inline);
+    window.__TIE = t; window.__TIE_GIVEN = !!givenOnly;
+    try { return R(s, inline); } finally { window.__TIE = null; }
+  }
+  const tieKey = (live) => `<div class="tiekey"><button type="button" class="btn ghost sm" data-act="ties" aria-pressed="${live}">Trace the numbers: ${live ? "on" : "off"}</button>${live
+    ? `<span><mark class="tie tg h0">12</mark> given in the question</span><span><mark class="tie td h2">12</mark> worked out on the way</span><span>Click a number to follow it.</span>` : ""}</div>`;
+  // the case above a run of questions shows the values of the question last answered, hinted or clicked
+  function paintVig(setId, id) {
+    const st = PATH.sets[setId], t = id && tiesOn() ? tiesOf(id) : null, on = !!(t && t.given > 0);
+    document.querySelectorAll(".p-vig").forEach((sec) => {
+      if (sec.dataset.set !== setId || (sec.dataset.q || "") === (on ? id : "")) return;
+      const body = sec.querySelector(".rich"), card = on && document.getElementById("pq-" + id), n = card ? (card.querySelector(".qn") || {}).textContent : "";
+      sec.dataset.q = on ? id : "";
+      body.innerHTML = (on ? `<p class="tienote" style="margin:0 0 8px">Highlighted: the values ${n || "this question"} uses.</p>` : "") + RT(st.vignette, on ? t : null, true);
+      typeset(body);
+    });
+  }
   const q = (id) => PATH.questions[id];
   const mod = (k) => PATH.modules[k];
   const cnt = (o) => Object.keys(o).length;
@@ -188,20 +219,22 @@
   }
 
   // ---- the question runner (one round)
-  function optHTML(id, letter, rec) {
+  function optHTML(id, letter, rec, tt) {
     const x = q(id), picked = rec && rec[0] === letter, right = x.answer === letter;
     const cls = !rec ? "" : right ? "right" : picked ? "wrong" : "";
-    return `<button type="button" class="p-opt ${cls}" data-act="pick" data-id="${E(id)}" data-l="${letter}" ${rec ? "disabled" : ""}><span class="ol">${letter}</span><span class="ot">${R(x.options[letter], true)}</span></button>`;
+    return `<button type="button" class="p-opt ${cls}" data-act="pick" data-id="${E(id)}" data-l="${letter}" ${rec ? "disabled" : ""}><span class="ol">${letter}</span><span class="ot">${RT(x.options[letter], tt, false, true)}</span></button>`;
   }
   function cardHTML(k, r, id, n) {
     const x = q(id), t = mod(k).topics[x.t], rec = peek(k)[r][id];
-    return `<article class="p-q ${rec ? (rec[1] ? "ok" : rec[0] === "-" ? "skipped" : "bad") : ""}" id="pq-${id}" data-id="${E(id)}">
+    const T = tiesOf(id), any = !!(T && T.groups.length), live = any && tiesOn(), tt = live && rec ? T : null, hint = !rec && live && T.given > 0 && hintedQ.has(id);
+    return `<article class="p-q ${rec ? (rec[1] ? "ok" : rec[0] === "-" ? "skipped" : "bad") : ""}" id="pq-${id}" data-id="${E(id)}"${tt || hint ? ' data-t="1"' : ""}>
       <div class="p-qh"><span class="qn">Q${n}</span><span class="chip plain" title="Topic">${R(t.title, true)}</span></div>
-      <div class="p-stem">${R(x.stem)}</div>
+      <div class="p-stem">${RT(x.stem, tt || (hint ? T : null), true)}</div>
+      ${hint ? `<p class="tienote">Hint: the highlighted ${T.given === 1 ? "value is the one" : "values are the ones"} this question uses${x.set ? ", here and in the case above" : ""}.</p>` : ""}
       ${window.LosView ? LosView.tag(k, id) : ""}
-      <div class="p-opts">${["A", "B", "C"].map((l) => optHTML(id, l, rec)).join("")}</div>
-      ${rec ? `<div class="p-expl"><div class="p-verdict">${rec[0] === "-" ? "Skipped" : rec[1] ? "Correct" : `Not quite: the answer is ${x.answer}`}</div><div class="rich">${R(x.explanation)}</div></div>`
-             : `<div class="p-skip"><button type="button" class="btn ghost sm" data-act="skip" data-id="${E(id)}">Skip</button></div>`}
+      <div class="p-opts">${["A", "B", "C"].map((l) => optHTML(id, l, rec, tt)).join("")}</div>
+      ${rec ? `<div class="p-expl"><div class="p-verdict">${rec[0] === "-" ? "Skipped" : rec[1] ? "Correct" : `Not quite: the answer is ${x.answer}`}</div>${any ? tieKey(live) : ""}<div class="rich">${RT(x.explanation, tt)}</div></div>`
+             : `<div class="p-skip">${T && T.given > 0 ? `<button type="button" class="btn ghost sm" data-act="hint" data-id="${E(id)}" aria-pressed="${hint}">Hint: which numbers?</button>` : ""}<button type="button" class="btn ghost sm" data-act="skip" data-id="${E(id)}">Skip</button></div>`}
     </article>`;
   }
   function runnerStage(k, r) {
@@ -210,7 +243,7 @@
     const cards = ids.map((id) => {
       const x = q(id); n++;
       let head = "";
-      if (x.set && x.set !== lastSet) { const st = PATH.sets[x.set]; head = `<section class="p-vig card"><h4>${R(st.title, true)}</h4><div class="rich">${R(st.vignette)}</div></section>`; }
+      if (x.set && x.set !== lastSet) { const st = PATH.sets[x.set]; head = `<section class="p-vig card" data-set="${E(x.set)}"><h4>${R(st.title, true)}</h4><div class="rich">${R(st.vignette)}</div></section>`; }
       lastSet = x.set;
       return head + cardHTML(k, r, id, n);
     }).join("");
@@ -235,13 +268,13 @@
   // ---- the review between the rounds
   // a missed question in the review: the case it belongs to, your pick, the answer and why
   function missedCard(k, id) {
-    const x = q(id), you = (peek(k).A[id] || [])[0], st = x.set && PATH.sets[x.set];
-    return `<div class="p-missed">
+    const x = q(id), you = (peek(k).A[id] || [])[0], st = x.set && PATH.sets[x.set], T = tiesOn() ? tiesOf(id) : null;
+    return `<div class="p-missed" data-t="1">
       ${st ? `<details class="pm-case"><summary>Case: ${R(st.title, true)} (show)</summary><div class="rich">${R(st.vignette)}</div></details>` : ""}
-      <div class="pm-stem">${R(x.stem, true)}</div>
-      ${you && x.options[you] ? `<div class="pm-a you"><b>You picked ${E(you)}</b>${R(x.options[you], true)}</div>` : ""}
-      <div class="pm-a ok"><b>Answer ${E(x.answer)}</b>${R(x.options[x.answer], true)}</div>
-      ${x.explanation ? `<div class="pm-why rich">${R(x.explanation)}</div>` : ""}
+      <div class="pm-stem">${RT(x.stem, T, true, true)}</div>
+      ${you && x.options[you] ? `<div class="pm-a you"><b>You picked ${E(you)}</b>${RT(x.options[you], T, false, true)}</div>` : ""}
+      <div class="pm-a ok"><b>Answer ${E(x.answer)}</b>${RT(x.options[x.answer], T, false, true)}</div>
+      ${x.explanation ? `<div class="pm-why rich">${RT(x.explanation, T)}</div>` : ""}
     </div>`;
   }
 
@@ -304,15 +337,18 @@
     rec[id] = [choice, choice === "-" ? null : choice === x.answer];
     if (ms(k).stage === "intro") ms(k).stage = r;
     save(k);
-    const card = document.getElementById("pq-" + id);
-    if (card) {
-      const n = Number((card.querySelector(".qn") || {}).textContent.slice(1)) || 1;
-      const tmp = document.createElement("div"); tmp.innerHTML = cardHTML(k, r, id, n);
-      card.replaceWith(tmp.firstElementChild);
-      const fresh = document.getElementById("pq-" + id);
-      typeset(fresh);
-    }
+    repaintCard(k, r, id);
     repaintFinish(k, r);
+  }
+  // one question card drawn again in place (after an answer, a hint, or the tracing switch)
+  function repaintCard(k, r, id) {
+    const card = document.getElementById("pq-" + id), x = q(id);
+    if (!card) return;
+    const n = Number((card.querySelector(".qn") || {}).textContent.slice(1)) || 1;
+    const tmp = document.createElement("div"); tmp.innerHTML = cardHTML(k, r, id, n);
+    card.replaceWith(tmp.firstElementChild);
+    typeset(document.getElementById("pq-" + id));
+    if (x.set) paintVig(x.set, peek(k)[r][id] || hintedQ.has(id) ? id : null);
   }
   function go(h) { if (location.hash === h) render(false); else location.hash = h; }
   document.addEventListener("click", (e) => {
@@ -321,6 +357,8 @@
     const act = b.dataset.act, k = b.dataset.key || (document.getElementById("p-stage") || {}).dataset?.key, r = b.dataset.r || (document.getElementById("p-stage") || {}).dataset?.stage;
     if (act === "pick") record(k, r, b.dataset.id, b.dataset.l);
     else if (act === "skip") record(k, r, b.dataset.id, "-");
+    else if (act === "hint") { const id = b.dataset.id; if (hintedQ.has(id)) hintedQ.delete(id); else { hintedQ.add(id); try { localStorage.setItem(TIEPREF, "on"); } catch {} } repaintCard(k, r, id); }
+    else if (act === "ties") { try { localStorage.setItem(TIEPREF, tiesOn() ? "off" : "on"); } catch {} render(true); }
     else if (act === "skiprest") { for (const id of mod(k).rounds[r]) if (!peek(k)[r][id]) ms(k)[r][id] = ["-", null]; save(k); render(true); }
     else if (act === "start") { if (ms(k).stage === "intro") ms(k).stage = "A"; save(k); go(href(k, "A")); }
     else if (act === "finish") {
@@ -332,6 +370,20 @@
       save(k); render(true);
     } else if (act === "toB") { ms(k).stage = "B"; save(k); go(href(k, "B")); }
     else if (act === "redoB") { ms(k).B = {}; ms(k).stage = "B"; delete ms(k).done; save(k); go(href(k, "B")); }
+  });
+  // click a marked number: every place it is used in that question (and its case) lights up; click again, or elsewhere, to clear
+  document.addEventListener("click", (e) => {
+    if (MODE !== "path" || !window.Ties) return;
+    const mark = e.target.closest(".tie"), card = e.target.closest('.p-q[data-t="1"], .p-missed[data-t="1"]'), vig = e.target.closest(".p-vig");
+    const lit = [...document.querySelectorAll(".tie-focus")];
+    if (!mark || mark.closest(".tiekey") || !(card || vig)) { if (lit.length && !e.target.closest("[data-act]")) Ties.focus(lit, null); return; }
+    const id = Ties.idOf(mark), was = mark.classList.contains("on");
+    const x = card && card.dataset.id ? q(card.dataset.id) : null;
+    if (x && x.set) paintVig(x.set, card.dataset.id);
+    const home = card || (vig && vig.dataset.q && document.getElementById("pq-" + vig.dataset.q));
+    const scope = [home, ...(home && home.dataset.id && q(home.dataset.id).set ? document.querySelectorAll(".p-vig") : [])].filter((el) => el && (el === home || el.dataset.q === home.dataset.id));
+    Ties.focus(lit, null);
+    if (id !== null && !was) Ties.focus(scope, id);
   });
   document.addEventListener("change", (e) => {
     const c = e.target;
@@ -347,6 +399,7 @@
     home,
     module: moduleView,
     wire() {
+      if (window.Ties) Ties.style();
       typeset($("content"));
       const hp = new URLSearchParams(location.hash.slice(1)), qid = hp.get("q"), at = hp.get("at");
       const el = (qid && document.getElementById("pq-" + qid)) || (at && hp.has("los") && document.getElementById("los-" + at));
