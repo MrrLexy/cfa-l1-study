@@ -1,6 +1,6 @@
 # CFA Level I Study
 
-An unofficial study guide for the CFA Level I exam: the study **Path** (73 sections with 1358 practice questions and a review step after each), the **LOS cards** (all 541 learning outcomes, each with an answer, and note cards to study on screen, print or download as PDFs), the **Guide** (a walkthrough of every module, with concepts and formulas) and the **Map**.
+An unofficial study guide for the CFA Level I exam: the study **Path** (73 sections with 1358 practice questions and a review step after each), the **LOS cards** (all 541 learning outcomes, each with an answer, and note cards to study on screen, print or download as PDFs), the **Guide** (a walkthrough of every module, with concepts and formulas), the **Map** and **Rapid fire** (one question after another by topic, with the full explanation straight after each answer).
 
 **This copy is passcode-protected.** The study material in it is encrypted. Open the site, type a username and the passcode you were given, and tick "Keep this device unlocked" so you only type it once per device.
 

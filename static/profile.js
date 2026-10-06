@@ -88,6 +88,9 @@
             if (!a.exam && b.exam) a.exam = b.exam;
             a.updated = Date.now();
             localStorage.setItem(k, JSON.stringify(a));
+          } else if (k === "site-rapid-v1" && a && b && a.q && b.q) {   // rapid fire: per question, the copy answered last wins
+            for (const [id, h] of Object.entries(b.q)) if (Array.isArray(h) && (h[3] || 0) > ((a.q[id] || [])[3] || 0)) a.q[id] = h;
+            localStorage.setItem(k, JSON.stringify(a));
           } else if (Array.isArray(a) && Array.isArray(b)) localStorage.setItem(k, JSON.stringify([...new Set([...a, ...b])]));
           else if (a && b && typeof a === "object" && typeof b === "object") localStorage.setItem(k, JSON.stringify({ ...b, ...a }));
         } catch { /* keep what is here */ }
