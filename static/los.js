@@ -54,15 +54,35 @@
     return `${ans || `<p class="muted small">No paragraph of the walkthrough answers this on its own; read the sections below.</p>`}${forms}
       <div class="los-links"><span class="sub">Read more in the Guide</span>${secs}<a href="${A().guideLink(k)}">Whole module</a></div>`;
   }
+  // A card's questions open in place and can be answered there. That is extra practice, not a step of the section's two rounds, so
+  // the answer is counted with the rapid-fire answers (which the weak outcomes panel reads) and the rounds are left as they are.
+  const HKEY = "site-rapid-v1", tried = {};   // tried: question id -> the letter picked on this page
+  function noteAnswer(id, ok) {
+    try {
+      const h = JSON.parse(localStorage.getItem(HKEY)) || { v: 1, q: {} }, x = (h.q = h.q || {})[id] || [0, 0, 0, 0];
+      x[ok ? 0 : 1]++; x[2] = ok ? 1 : 0; x[3] = Date.now();
+      h.q[id] = x;
+      localStorage.setItem(HKEY, JSON.stringify(h));
+    } catch { /* not remembered */ }
+  }
+  const markOf = (id, rec) => (tried[id] ? (tried[id] === A().q(id).answer ? ["ok", "✓"] : ["bad", "✗"]) : rec ? (rec[1] ? ["ok", "✓"] : rec[0] === "-" ? ["", "–"] : ["bad", "✗"]) : ["", ""]);
+  function practiceHTML(k, r, id) {
+    const x = A().q(id), got = tried[id], st = x.set && A().data.sets && A().data.sets[x.set];
+    return `${st ? `<details class="los-vig"><summary>The case this question belongs to${st.title ? ": " + E(st.title) : ""}</summary><div class="rich">${R(st.vignette)}</div></details>` : ""}
+      <div class="p-stem">${R(x.stem)}</div>
+      <div class="p-opts">${["A", "B", "C"].map((l) => `<button type="button" class="p-opt ${got ? (l === x.answer ? "right" : l === got ? "wrong" : "") : ""}" data-los-act="pick" data-k="${E(k)}" data-r="${r}" data-id="${E(id)}" data-l="${l}" ${got ? "disabled" : ""}><span class="ol">${l}</span><span class="ot">${R(x.options[l], true)}</span></button>`).join("")}</div>
+      ${got ? `<div class="p-expl"><div class="p-verdict">${got === x.answer ? "Correct" : `Not quite: the answer is ${x.answer}`}</div>${(x.steps || []).length ? `<div class="p-walk"><span class="eyebrow">Walkthrough</span><ol>${x.steps.map((s) => `<li>${R(s, true)}</li>`).join("")}</ol></div>` : ""}<div class="rich">${R(x.explanation)}</div></div>` : ""}
+      <div class="los-qfoot"><a href="${A().href(k, r)}&q=${encodeURIComponent(id)}">Open it in Round ${r} of the section</a></div>`;
+  }
   function questionsHTML(k, c) {
     const rows = ["A", "B"].flatMap((r) => c.qs[r].map((id) => [r, id]));
     if (!rows.length) return "";
     const s = A().peek(k);
-    return `<div class="los-qs"><div class="sub">${c.qs_topic ? "Questions on this outcome's topic" : "Questions that test this outcome"}</div>
+    return `<div class="los-qs"><div class="sub">${c.qs_topic ? "Questions on this outcome's topic" : "Questions that test this outcome"} <span class="muted">· open one to answer it here</span></div>
       ${rows.map(([r, id]) => {
-        const rec = s[r] && s[r][id], x = A().q(id);
-        return `<a class="los-q" href="${A().href(k, r)}&q=${encodeURIComponent(id)}"><span class="lq-r">Round ${r}</span><span class="lq-t">${E(plain(x.stem, 110))}</span>
-          <span class="lq-s ${rec ? (rec[1] ? "ok" : rec[0] === "-" ? "" : "bad") : ""}">${rec ? (rec[1] ? "✓" : rec[0] === "-" ? "–" : "✗") : ""}</span></a>`;
+        const x = A().q(id), [cls, mark] = markOf(id, s[r] && s[r][id]);
+        return `<details class="los-qd" data-qid="${E(id)}"><summary class="los-q"><span class="lq-r">Round ${r}</span><span class="lq-t">${E(plain(x.stem, 110))}</span>
+          <span class="lq-s ${cls}">${mark}</span></summary><div class="los-qbody">${practiceHTML(k, r, id)}</div></details>`;
       }).join("")}</div>`;
   }
   const topicChips = (k, c) => c.topics.map((t) => `<span class="chip plain">${R(P().modules[k].topics[t].title, true)}</span>`).join("");
@@ -95,7 +115,7 @@
   function home() {
     const total = allTotal(), ticked = allTicked();
     const phases = P().phases.map((p) => `<section class="p-phase"><div class="p-phase-h"><h3>${E(p.title)}</h3>
-        <span class="muted small">${p.modules.reduce((t, k) => t + nTicked(k), 0)} of ${p.modules.reduce((t, k) => t + nTotal(k), 0)} ticked · <a href="notecards.html?p=${E(p.id)}">print or PDF</a></span></div>
+        <span class="muted small">${p.modules.reduce((t, k) => t + nTicked(k), 0)} of ${p.modules.reduce((t, k) => t + nTotal(k), 0)} ticked · <a href="notecards.html?p=${E(p.id)}&view=flip">flip through</a> · <a href="notecards.html?p=${E(p.id)}">print or PDF</a></span></div>
       <div class="p-rows">${p.modules.map((k) => `<div class="p-row los-mrow"><span class="pn">${A().NUM_OF[k]}</span>
         <div class="pt"><b>${E(A().mod(k).title)}</b><span class="muted small">${E(k)} · ${nTotal(k) || "no"} learning outcomes</span></div>
         <div class="ps"><span class="pscore" data-los-count="${E(k)}">${nTicked(k)} of ${nTotal(k)}</span><a class="btn sm" href="${hrefL(k)}">List</a>
@@ -106,7 +126,7 @@
         outcome, say the answer, flip and mark it got it or again. Ticks are shared with the Path, and the questions there show which outcome they test.</p>
         <div class="p-bar"><div class="progress"><i data-los-bar="*" style="width:${A().pct(ticked, total)}%"></i></div>
           <div class="muted small"><span data-los-count="*">${ticked} of ${total}</span> outcomes ticked</div></div>
-        <div class="p-actions"><a class="btn" href="notecards.html">Print or download the note cards</a></div></div>
+        <div class="p-actions"><a class="btn" href="notecards.html?view=flip">Flip through the note cards</a><a class="btn" href="notecards.html">Print or download them</a></div></div>
       ${phases}</div>`;
   }
 
@@ -129,7 +149,7 @@
         <div class="muted small"><span data-los-count="${E(k)}">${nTicked(k)} of ${nTotal(k)}</span> outcomes ticked</div></div>
         <div class="p-actions"><a class="btn primary" href="${hrefL(k, { mode: "cards" })}">Note cards</a>
           <a class="btn" href="${hrefL(k, only ? {} : { only: "open" })}">${only ? "Show all" : "Only unticked"}</a>
-          <a class="btn" href="notecards.html?m=${encodeURIComponent(k)}">Print</a></div></div>
+          <a class="btn" href="notecards.html?m=${encodeURIComponent(k)}&view=flip">Flip through</a><a class="btn" href="notecards.html?m=${encodeURIComponent(k)}">Print</a></div></div>
       ${rows || `<div class="card"><p>Every outcome in this module is ticked.</p></div>`}
       <nav class="g-pager p-pager"><a href="${pv ? hrefL(pv) : "#los"}" class="prev"><span class="dir">‹ ${pv ? "Previous module" : "All modules"}</span>${pv ? E(A().mod(pv).title) : ""}</a>
         <a href="${nx ? hrefL(nx) : "#los"}" class="next"><span class="dir">${nx ? "Next module" : "All modules"} ›</span>${nx ? E(A().mod(nx).title) : ""}</a></nav></div>`;
@@ -212,7 +232,19 @@
     const b = e.target.closest("[data-los-act]");
     if (!b) return;
     const act = b.dataset.losAct;
-    if (act === "flip") flip();
+    if (act === "pick") {
+      const id = b.dataset.id, x = A().q(id);
+      if (!x || tried[id]) return;
+      tried[id] = b.dataset.l;
+      noteAnswer(id, b.dataset.l === x.answer);
+      document.querySelectorAll(`.los-qd[data-qid="${CSS.escape(id)}"]`).forEach((d) => {   // the same question can sit on two cards
+        const body = d.querySelector(".los-qbody"), s = d.querySelector(".lq-s"), [cls, mark] = markOf(id);
+        body.innerHTML = practiceHTML(b.dataset.k, b.dataset.r, id);
+        if (typeof typeset === "function") typeset(body);
+        s.className = "lq-s " + cls; s.textContent = mark;
+      });
+    }
+    else if (act === "flip") flip();
     else if (act === "got") cardStep(1, true);
     else if (act === "again") cardStep(1, false);
   });

@@ -259,7 +259,7 @@ function index(P, vols) {
   const mods = P.modules || {}, sets = P.sets || {}, grouped = new Map();
   for (const [id, q] of Object.entries(P.questions || {})) {
     const m = mods[q.module] || {}, t = (m.topics || [])[q.t];
-    const x = { id, stem: q.stem, options: q.options, answer: q.answer, explanation: q.explanation, module: q.module, where: [m.title, t && t.title].filter(Boolean).join(": ") };
+    const x = { id, stem: q.stem, options: q.options, answer: q.answer, explanation: q.explanation, steps: q.steps, module: q.module, where: [m.title, t && t.title].filter(Boolean).join(": ") };
     if (!q.set) { QI.set(id, x); sub(subjectOf(q.module)).singles.push(id); }
     else if (sets[q.set]) { if (!grouped.has(q.set)) grouped.set(q.set, []); grouped.get(q.set).push(x); }
   }

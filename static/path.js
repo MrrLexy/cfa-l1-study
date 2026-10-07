@@ -44,7 +44,7 @@
     if (!window.Ties) return null;
     if (!tieMemo.has(id)) {
       const x = q(id), st = x.set && PATH.sets[x.set];
-      tieMemo.set(id, Ties.build({ source: [st ? st.vignette : "", x.stem], solution: [x.explanation], options: ["A", "B", "C"].map((l) => x.options[l]) }));
+      tieMemo.set(id, Ties.build({ source: [st ? st.vignette : "", x.stem], solution: [...(x.steps || []), x.explanation], options: ["A", "B", "C"].map((l) => x.options[l]) }));
     }
     return tieMemo.get(id);
   }
@@ -107,6 +107,39 @@
   }
   const guideLink = (k, idx) => "#" + new URLSearchParams({ g: k, ...(idx != null ? { at: "gw" + idx } : {}) }).toString();
 
+  // ---- weak outcomes: every answer saved on this device (both rounds here, and rapid fire), added up by learning outcome
+  const WEAK_MIN = 3, WEAK_CUT = 70;   // an outcome is listed once it has this many answers and fewer than this percent right
+  let weakAll = false;
+  function outcomeStats() {
+    const byQ = {};
+    const add = (id, right, wrong) => { if (!q(id) || !(right + wrong)) return; const b = byQ[id] || (byQ[id] = [0, 0]); b[0] += right; b[1] += wrong; };
+    for (const m of Object.values(ST.mods)) for (const r of ["A", "B"]) for (const [id, a] of Object.entries(m[r] || {})) if (a && a[0] !== "-") add(id, a[1] ? 1 : 0, a[1] ? 0 : 1);
+    try { const h = JSON.parse(localStorage.getItem("site-rapid-v1")); for (const [id, a] of Object.entries((h && h.q) || {})) add(id, +a[0] || 0, +a[1] || 0); } catch { /* no rapid fire answers yet */ }
+    const byLos = {};
+    for (const [id, [right, wrong]] of Object.entries(byQ)) {
+      const x = q(id), m = mod(x.module), t = m && m.topics[x.t];
+      if (!t) continue;
+      for (const li of t.los) { const o = byLos[x.module + "|" + li] || (byLos[x.module + "|" + li] = { k: x.module, li, text: m.los[li], n: 0, right: 0 }); o.n += right + wrong; o.right += right; }
+    }
+    return Object.values(byLos);
+  }
+  function weakPanel() {
+    const all = outcomeStats(), seen = all.filter((o) => o.n >= WEAK_MIN);
+    const weak = seen.filter((o) => pct(o.right, o.n) < WEAK_CUT).sort((a, b) => a.right / a.n - b.right / b.n || b.n - a.n || NUM_OF[a.k] - NUM_OF[b.k]);
+    const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    const row = (o) => `<li><div class="pw-t"><b title="${E(cap(o.text))}">${E(cap(o.text))}</b><span class="muted small">${E(o.k)} · ${E(mod(o.k).title)}</span></div>
+      <div class="pw-s"><span class="pw-pct">${pct(o.right, o.n)}%</span><span class="muted small">${o.right} of ${o.n} right</span></div>
+      <div class="pw-a"><a class="btn sm" href="${href(o.k)}">Open the section</a>${window.LosView && LosView.has(o.k) ? `<a class="btn ghost sm" href="#los&lm=${encodeURIComponent(o.k)}">Outcomes and note cards</a>` : ""}</div></li>`;
+    let body;
+    if (!all.length) body = `<p class="muted">Answer some questions, here or in Rapid fire, and the learning outcomes you find hardest will be listed here.</p>`;
+    else if (!seen.length) body = `<p class="muted">Not enough answers yet: an outcome is judged once you have answered ${WEAK_MIN} questions on it.</p>`;
+    else if (!weak.length) body = `<p class="muted">Nothing below ${WEAK_CUT}% so far, across the ${seen.length} outcome${seen.length === 1 ? "" : "s"} with ${WEAK_MIN} or more answers.</p>`;
+    else body = `<ol class="p-weak-l">${weak.slice(0, weakAll ? weak.length : 6).map(row).join("")}</ol>`
+      + (weak.length > 6 ? `<button type="button" class="btn ghost sm" data-act="weakall" aria-expanded="${weakAll}">${weakAll ? "Show fewer" : `Show all ${weak.length}`}</button>` : "");
+    return `<section class="p-weak card"><div class="p-weak-h"><h3>Weak outcomes</h3>${weak.length ? `<span class="badge"><b>${weak.length}</b> below ${WEAK_CUT}%</span>` : ""}</div>
+      <p class="muted small">From your answers on this device, in the Path and in Rapid fire: the learning outcomes with fewer than ${WEAK_CUT}% right, once you have answered ${WEAK_MIN} or more questions on them. Weakest first.</p>${body}</section>`;
+  }
+
   // ---------------------------------------------------------------- navigation (the sidebar in Path mode)
   function nav() {
     if (window.LosView && new URLSearchParams(location.hash.slice(1)).has("los")) return LosView.nav();
@@ -157,6 +190,7 @@
         <p class="muted small">Coverage: the ${ORDERP.length} sections hold ${los} official learning outcomes in ${topics} topics; every topic has questions in both rounds (${qs} questions in all, and you don't have to use them all).</p>
       </details>
       ${pacePanel()}
+      ${weakPanel()}
       ${PATH.phases.map(phaseCard).join("")}
     </div>`;
   }
@@ -233,7 +267,7 @@
       ${hint ? `<p class="tienote">Hint: the highlighted ${T.given === 1 ? "value is the one" : "values are the ones"} this question uses${x.set ? ", here and in the case above" : ""}.</p>` : ""}
       ${window.LosView ? LosView.tag(k, id) : ""}
       <div class="p-opts">${["A", "B", "C"].map((l) => optHTML(id, l, rec, tt)).join("")}</div>
-      ${rec ? `<div class="p-expl"><div class="p-verdict">${rec[0] === "-" ? "Skipped" : rec[1] ? "Correct" : `Not quite: the answer is ${x.answer}`}</div>${any ? tieKey(live) : ""}<div class="rich">${RT(x.explanation, tt)}</div></div>`
+      ${rec ? `<div class="p-expl"><div class="p-verdict">${rec[0] === "-" ? "Skipped" : rec[1] ? "Correct" : `Not quite: the answer is ${x.answer}`}</div>${any ? tieKey(live) : ""}${(x.steps || []).length ? `<div class="p-walk"><span class="eyebrow">Walkthrough</span><ol>${x.steps.map((w) => `<li>${RT(w, tt, false, true)}</li>`).join("")}</ol></div>` : ""}<div class="rich">${RT(x.explanation, tt)}</div></div>`
              : `<div class="p-skip">${T && T.given > 0 ? `<button type="button" class="btn ghost sm" data-act="hint" data-id="${E(id)}" aria-pressed="${hint}">Hint: which numbers?</button>` : ""}<button type="button" class="btn ghost sm" data-act="skip" data-id="${E(id)}">Skip</button></div>`}
     </article>`;
   }
@@ -274,6 +308,7 @@
       <div class="pm-stem">${RT(x.stem, T, true, true)}</div>
       ${you && x.options[you] ? `<div class="pm-a you"><b>You picked ${E(you)}</b>${RT(x.options[you], T, false, true)}</div>` : ""}
       <div class="pm-a ok"><b>Answer ${E(x.answer)}</b>${RT(x.options[x.answer], T, false, true)}</div>
+      ${(x.steps || []).length ? `<div class="p-walk"><span class="eyebrow">Walkthrough</span><ol>${x.steps.map((w) => `<li>${RT(w, T, false, true)}</li>`).join("")}</ol></div>` : ""}
       ${x.explanation ? `<div class="pm-why rich">${RT(x.explanation, T)}</div>` : ""}
     </div>`;
   }
@@ -359,6 +394,7 @@
     else if (act === "skip") record(k, r, b.dataset.id, "-");
     else if (act === "hint") { const id = b.dataset.id; if (hintedQ.has(id)) hintedQ.delete(id); else { hintedQ.add(id); try { localStorage.setItem(TIEPREF, "on"); } catch {} } repaintCard(k, r, id); }
     else if (act === "ties") { try { localStorage.setItem(TIEPREF, tiesOn() ? "off" : "on"); } catch {} render(true); }
+    else if (act === "weakall") { weakAll = !weakAll; render(true); }
     else if (act === "skiprest") { for (const id of mod(k).rounds[r]) if (!peek(k)[r][id]) ms(k)[r][id] = ["-", null]; save(k); render(true); }
     else if (act === "start") { if (ms(k).stage === "intro") ms(k).stage = "A"; save(k); go(href(k, "A")); }
     else if (act === "finish") {
